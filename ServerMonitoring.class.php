@@ -7,7 +7,7 @@
 *
 * @author Prasetyo Wicaksono <prasetyo@nanmit.es>
 * @license DBAD <http://dbad-license.org/license>
-* @link https://github.com/Atriedes/codeigniter-softlayer-dns
+* @link https://github.com/Atriedes/server-monitoring-php
 * @link http://us3.php.net/manual/en/function.socket-create.php#80775
 * @link http://css-tricks.com/snippets/php/check-if-website-is-available/
 */
