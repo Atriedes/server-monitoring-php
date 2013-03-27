@@ -17,13 +17,16 @@ Class ServerMonitoring
     private $ip = '';
     private $host = '';
 
-    // Ping variable
-    private $icmp_socket;
+    // ping variable
+    private $icmpSocket;
     private $request;
-    private $request_len;
+    private $requestLen;
     private $reply;
     private $time;
-    private $timer_start_time;
+    private $timerStartTime;
+
+    // time config
+    private $percision = 3;
 
     /**
      * Class constructor
@@ -58,12 +61,29 @@ Class ServerMonitoring
             $ip = gethostbyname($host);
             if ($ip === $host){
                  throw new Exception('Invalid host');
+                 return FALSE;
             }
         } else {
             $ip = $host;
         }
 
     return $ip;
+    }
+
+    private function startTime()
+    {
+        $this->timerStartTime = microtime();
+    }
+
+    private function finishTime()
+    {
+        $startTime = explode (" ", $this->timerStartTime);
+        $startTime = $startTime[1] + $startTime[0];
+        $endTime = explode (" ", microtime());
+        $endTime = $endTime[1] + $endTime[0];
+
+        // return how long ping take process
+        return number_format ($endTime - $startTime, $this->percision);
     }
 
     /**
@@ -74,17 +94,16 @@ Class ServerMonitoring
      * @param   integer
      * @return  integer
      */
-    public function servicePing($timeout = 5, $percision = 3)
+    public function servicePing($timeout = 5)
     {
-        $this->icmp_socket = socket_create(AF_INET, SOCK_RAW, 1);
-        socket_set_block($this->icmp_socket);
+        $this->icmpSocket = socket_create(AF_INET, SOCK_RAW, 1);
+        socket_set_block($this->icmpSocket);
 
         // parameter validation
         if ((int)$timeout <= 0) $timeout=5;
-        if ((int)$percision <= 0) $percision=3;
 
         // set the timeout
-        socket_set_option($this->icmp_socket,
+        socket_set_option($this->icmpSocket,
             SOL_SOCKET,
             SO_RCVTIMEO,
             array(
@@ -94,11 +113,11 @@ Class ServerMonitoring
         );
 
         // is valid host?
-        if (@socket_connect($this->icmp_socket, $this->ip, NULL))
+        if (@socket_connect($this->icmpSocket, $this->ip, NULL))
         {
 
         } else {
-            return FALSE;
+            return array('isSuccess' => FALSE, 'msg' => 'cant connect to host', 'errorCode' => 503);
         }
 
         // build packet data
@@ -109,13 +128,13 @@ Class ServerMonitoring
         $id = "\x00\x00";
         $sqn = "\x00\x00"; 
 
-        $dataframe = $type.$code.$chksm.$id.$sqn.$data;
+        $dataFrame = $type.$code.$chksm.$id.$sqn.$data;
 
         $sum = 0;
-        for($i=0;$i<strlen($dataframe);$i += 2)
+        for($i=0;$i<strlen($dataFrame);$i += 2)
         {
-            if($dataframe[$i+1]) $bits = unpack('n*',$dataframe[$i].$dataframe[$i+1]);
-             else $bits = unpack('C*',$dataframe[$i]);
+            if($dataFrame[$i+1]) $bits = unpack('n*',$dataFrame[$i].$dataFrame[$i+1]);
+             else $bits = unpack('C*',$dataFrame[$i]);
             $sum += $bits[1];
         }
 
@@ -123,25 +142,19 @@ Class ServerMonitoring
             $checksum = pack('n1',~$sum);
 
         $this->request = $type.$code.$checksum.$id.$sqn.$data;
-        $this->request_len = strlen($this->request);
+        $this->requestLen = strlen($this->request);
 
         // request start time
-        $this->timer_start_time = microtime();
+        $this->startTime();
 
-        socket_write($this->icmp_socket, $this->request, $this->request_len);
+        socket_write($this->icmpSocket, $this->request, $this->requestLen);
 
-        if (@socket_recv($this->icmp_socket, $this->reply, 256, 0))
+        if (@socket_recv($this->icmpSocket, $this->reply, 256, 0))
         {
             // retrieve finish time
-            $start_time = explode (" ", $this->timer_start_time);
-            $start_time = $start_time[1] + $start_time[0];
-            $end_time = explode (" ", microtime());
-            $end_time = $end_time[1] + $end_time[0];
-
-            // return how long ping take process
-            return number_format ($end_time - $start_time, $percision);
+            return array('isSuccess' => TRYE, 'msg' => $this->finishTime(), 'code' => 200);
         } else {
-            return FALSE;
+            return array('isSuccess' => FALSE, 'msg' => 'request timeout', 'code' => 408);
         }
 
     }
@@ -155,9 +168,21 @@ Class ServerMonitoring
      */
     public function serviceIcmp($port)
     {
+        // is valid host?
+        $this->icmpSocket = socket_create(AF_INET, SOCK_RAW, 1);
+        if (@socket_connect($this->icmpSocket, $this->ip, NULL))
+        {
+
+        } else {
+            return array('isSuccess' => FALSE, 'msg' => 'cant connect to host', 'code' => 503);
+        }
+
+
         try {
+            $this->startTime();
             // open connection
             $conn = @fsockopen($this->ip, $port, $errno, $errstr, 2);
+            $endTime = $this->finishTime();
         } catch (Exception $e)
         {
             throw new Exception($e->getMessage());
@@ -165,7 +190,9 @@ Class ServerMonitoring
 
         if ($conn) {
             fclose($conn);
-            return TRUE;
+            return array('isSuccess' => TRUE, 'msg' => $endTime, 'code' => 200);
+        } else {
+            return array('isSuccess' => FALSE, 'msg' => 'cant connect to port '.$port, 'code' => 503);
         }
     }
 
@@ -178,6 +205,16 @@ Class ServerMonitoring
      */
     public function serviceCurl($isSecure = FALSE)
     {
+
+         // is valid host?
+        $this->icmpSocket = socket_create(AF_INET, SOCK_RAW, 1);
+        if (@socket_connect($this->icmpSocket, $this->ip, NULL))
+        {
+
+        } else {
+            return array('isSuccess' => FALSE, 'msg' => 'cant connect to host', 'code' => 503);
+        }
+
         // set agent
         $agent = "Mozilla/4.0 (compatible; MSIE 5.01; Windows NT 5.0)";
 
@@ -198,7 +235,13 @@ Class ServerMonitoring
             curl_setopt($ch,CURLOPT_SSL_VERIFYPEER, FALSE);
             curl_setopt($ch,CURLOPT_SSLVERSION,3);
             curl_setopt($ch,CURLOPT_SSL_VERIFYHOST, FALSE);
+
+            $this->startTime();
+
+             // execute request
             $page = curl_exec($ch);
+
+            $endTime = $this->finishTime();
 
             $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
@@ -209,9 +252,9 @@ Class ServerMonitoring
 
 
         if($httpcode >= 200 && $httpcode < 300){
-            return TRUE;
+            return array('isSuccess' => TRUE, 'msg' => $endTime, 'code' => 200);
         } else {
-            return FALSE;
+            return array('isSuccess' => FALSE, 'msg' => 'read code', 'code' => $httpcode);
         }
     }
 }
